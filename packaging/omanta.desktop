@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Omanta
+GenericName=Voice chat for coding agents
+Comment=Talk with any coding agent by voice
+Exec=omarchy-launch-or-focus-tui --app-id=org.omarchy.omanta omanta
+Icon=omanta
+Terminal=false
+Categories=Utility;Development;
+Keywords=voice;chat;agent;claude;tts;speech;tui;
+StartupNotify=false

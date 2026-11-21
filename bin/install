@@ -1,0 +1,13 @@
+#!/bin/sh
+# Builds the Arch package and installs it, then prepares the voice and starts
+# the voice service for this user.
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT/packaging"
+makepkg -fsi "$@"
+omanta setup
+systemctl --user daemon-reload
+systemctl --user enable omanta.service
+# restart, not start: after an upgrade the old daemon may still be running
+systemctl --user restart omanta.service
+echo "Installed. Open Omanta from the launcher, or run: omanta"

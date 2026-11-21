@@ -1,0 +1,9 @@
+/target/
+/packaging/pkg/
+/packaging/src/
+*.pkg.tar.*
+__pycache__/
+.plans/
+.cursor/
+.agents/
+.claude/

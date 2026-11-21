@@ -1,0 +1,15 @@
+[Unit]
+Description=omanta voice: a warm Kokoro voice for the omanta chat and read-aloud
+Documentation=https://github.com/omnium8/omanta
+PartOf=graphical-session.target
+After=graphical-session.target pipewire.service
+
+[Service]
+# The model and the Python environment live in ~/.local/share/omanta;
+# `omanta setup` downloads and builds them.
+ExecStart=/usr/bin/omanta daemon
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target
