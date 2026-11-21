@@ -270,6 +270,28 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
     textwrap::wrap(text, width.max(4)).into_iter().map(|c| c.into_owned()).collect()
 }
 
+/// The length in bytes of a slash command at the start of `text`, like
+/// "/compact" in "/compact now". A path like "/home/x" is not a command.
+fn command_len(text: &str) -> usize {
+    let Some(rest) = text.strip_prefix('/') else { return 0 };
+    let name = rest.split(char::is_whitespace).next().unwrap_or("");
+    if name.is_empty() || !name.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | ':')) {
+        return 0;
+    }
+    1 + name.len()
+}
+
+/// One row of a message: a slash command at the start of the message shows
+/// in the accent color, as in the agents' own TUIs.
+fn with_command(row: String, message: &str, first_row: bool, base: Style, accent: Color) -> Vec<Span<'static>> {
+    let n = if first_row { command_len(message) } else { 0 };
+    if n == 0 || !row.starts_with(&message[..n]) {
+        return vec![Span::styled(row, base)];
+    }
+    let rest = row[n..].to_string();
+    vec![Span::styled(row[..n].to_string(), base.fg(accent).bold()), Span::styled(rest, base)]
+}
+
 /// Every message as styled, wrapped lines.
 pub fn conversation_lines(app: &App, width: usize) -> Vec<Line<'static>> {
     let accent = app.theme.accent;
@@ -283,7 +305,9 @@ pub fn conversation_lines(app: &App, width: usize) -> Vec<Line<'static>> {
                 }
                 for (j, l) in wrap(&m.text, width - 2).into_iter().enumerate() {
                     let mark = if j == 0 { "› " } else { "  " };
-                    out.push(Line::from(vec![Span::styled(mark, Style::new().fg(accent).bold()), Span::styled(l, Style::new().bold())]));
+                    let mut spans = vec![Span::styled(mark, Style::new().fg(accent).bold())];
+                    spans.extend(with_command(l, &m.text, j == 0, Style::new().bold(), accent));
+                    out.push(Line::from(spans));
                 }
             }
             Kind::Agent => {
@@ -460,12 +484,15 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(block, area);
     let width = inner.width.saturating_sub(4) as usize;
     let (rows, row, col) = app.input.view_rows(width, inner.height as usize);
+    let message = app.input.text();
     let lines: Vec<Line> = rows
         .into_iter()
         .enumerate()
         .map(|(i, text)| {
             let mark = if i == 0 { "› " } else { "  " };
-            Line::from(vec![Span::styled(mark, Style::new().fg(app.theme.accent)), Span::raw(text)])
+            let mut spans = vec![Span::styled(mark, Style::new().fg(app.theme.accent))];
+            spans.extend(with_command(text, &message, i == 0, Style::new(), app.theme.accent));
+            Line::from(spans)
         })
         .collect();
     f.render_widget(Paragraph::new(lines), Rect { x: inner.x + 1, width: inner.width.saturating_sub(1), ..inner });
@@ -580,5 +607,27 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), Rect { x: inner.x + 1, width: inner.width.saturating_sub(2), ..inner });
     if let Some(c) = cursor {
         f.set_cursor_position(c);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_slash_commands() {
+        assert_eq!(command_len("/compact"), 8);
+        assert_eq!(command_len("/model sonnet"), 6);
+        assert_eq!(command_len("/typesafe:typesafe-ai go"), 21);
+        assert_eq!(command_len("/home/x/notes.txt"), 0);
+        assert_eq!(command_len("/ hello"), 0);
+        assert_eq!(command_len("what does /model do"), 0);
+
+        let accent = Color::Red;
+        let spans = with_command("/model sonnet".into(), "/model sonnet", true, Style::new(), accent);
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0].content, "/model");
+        assert_eq!(spans[0].style.fg, Some(accent));
+        assert_eq!(with_command("/model".into(), "/model", false, Style::new(), accent).len(), 1);
     }
 }
