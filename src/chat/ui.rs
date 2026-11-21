@@ -206,6 +206,7 @@ fn voice_span(app: &App) -> Span<'static> {
     }
     match v.status.phase.as_str() {
         "ready" => Span::styled(" voice ready ", muted),
+        "downloading" => Span::styled(" downloading the voice (340 MB)… ", muted),
         "installing" => Span::styled(" installing the voice… ", muted),
         _ => Span::styled(" loading the voice… ", muted),
     }

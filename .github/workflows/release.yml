@@ -1,0 +1,55 @@
+# Builds the Arch package for a version tag (v1.2.3) and publishes it on the
+# GitHub release, together with a pacman repository database. Because every
+# release carries the database, this URL is always the newest repository:
+#   https://github.com/omnium8/omanta/releases/latest/download
+#
+# Signing is optional. When the secret PACKAGER_GPG_KEY holds an armored
+# private key (without a passphrase), the package and the database are signed.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing tag to build again, like v0.3.0"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GPG_KEY: ${{ secrets.PACKAGER_GPG_KEY }}
+    steps:
+      - name: Install the build tools
+        run: pacman -Syu --noconfirm --needed git github-cli rust alsa-lib pipewire uv curl wl-clipboard
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Build the package and the repository
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          useradd -m builder
+          chown -R builder "$GITHUB_WORKSPACE"
+          if [ -n "$GPG_KEY" ]; then
+            printf '%s\n' "$GPG_KEY" | su builder -c 'gpg --batch --import'
+          fi
+          su builder -c "packaging/build-repo dist '$TAG'"
+
+      - name: Publish on the release
+        run: |
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --title "omanta ${TAG#v}" --generate-notes
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber dist/*
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

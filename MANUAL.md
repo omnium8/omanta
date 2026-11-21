@@ -25,6 +25,10 @@ One binary, `omanta`:
 
 The chat and the daemon talk over Unix sockets in `$XDG_RUNTIME_DIR/omanta/`.
 
+The chat starts the voice service when it is not running, and enables it for
+every login. On the first start, the service downloads the voice model (about
+340 MB). The chat shows "downloading the voice…" until it is done.
+
 If a command says it cannot connect to `daemon.sock`:
 
 ```sh
@@ -52,21 +56,26 @@ effect on the next conversation (`ctrl+n`).
 ## How a conversation works
 
 1. **Speech in.** In settings (`ctrl+o`), choose one:
-   - **Talk key** (`ctrl+space` by default): omanta records and sends. With Superwhisper, omanta records with `pw-record` and gives the file to `superwhisper transcribe`. With Voxtype, the running daemon records (`voxtype record start --file=…`). Both use the model that is already loaded. Neither types into other windows.
+   - **Talk key** (`alt+space` by default): omanta records and sends. With Voxtype (the default), the running daemon records (`voxtype record start --file=…`). With Superwhisper, omanta records with `pw-record` and gives the file to `superwhisper transcribe`. Both use the model that is already loaded. Neither types into other windows.
    - **Your own dictation**: your dictation tool (Omarchy's hold-RightAlt with Voxtype) types into the message line.
+
+   When Omarchy's dictation is on, Hyprland takes `alt+space` before omanta
+   gets it. Then Voxtype types into the message line, and that also works.
+   To see omanta's waveform instead of Voxtype's overlay, send the keys
+   through `omanta dictate` ([Keys in any window](#keys-in-any-window)).
 
    While Voxtype records, and the recording started while omanta had the
    focus, the message line shows your voice as a live ASCII waveform in the
    theme's colors. While it transcribes, a sweep. A recording started in
    another window shows Voxtype's own overlay instead, never both.
 
-   Settings set the waveform height, 1 to 4 rows. The message line has the
-   same height. **Background transparency** (off, 0.1 to 0.9) lets the
-   wallpaper show through the omanta window only, in foot, Omarchy's
-   terminal.
+   Settings set the waveform height, 1 to 4 rows (default 1). The message
+   line has the same height. **Background transparency** (off, 0.1 to 0.9,
+   default 0.4) lets the wallpaper show through the omanta window only, in
+   foot, Omarchy's terminal.
 
-   **Send after a pause** (off, instant, 2, 3, 4 or 5 s) sends dictated text
-   by itself. omanta tells dictation from typing by speed. Text you type
+   **Send after a pause** (off, instant, 2, 3, 4 or 5 s; default instant)
+   sends dictated text by itself. omanta tells dictation from typing by speed. Text you type
    waits for enter. The message line counts down, and any key resets it.
 
 2. **Voice rules.** The agent gets a system prompt that makes it talk like a
@@ -95,7 +104,7 @@ effect on the next conversation (`ctrl+n`).
 
 | Key | Action |
 | --- | --- |
-| `ctrl+space` | Talk; press again to send (set another key in settings) |
+| `alt+space` | Talk; press again to send (set another key in settings) |
 | `enter` | Send what you typed or dictated |
 | `tab` | Auto mode on or off, for this run |
 | `esc` | Stop the voice, the recording, and the agent |
@@ -141,7 +150,7 @@ end
 | `~/.local/share/omanta/` | The voice model and its Python environment |
 | `~/.local/state/omanta/sessions.json` | The last conversation of each agent |
 
-Default voice is `af_aoede`. In the voice name, `a` is American, `b` is
+Default voice is `af_aoede` at speed 1.1. In the voice name, `a` is American, `b` is
 British; `f` is female, `m` is male.
 
 The voice sidecar listens on `127.0.0.1` only (default port 8765).
@@ -149,13 +158,13 @@ The voice sidecar listens on `127.0.0.1` only (default port 8765).
 ## If something is wrong
 
 - **No voice.** Run `omanta status`. If it cannot connect, start the service:
-  `systemctl --user enable --now omanta`. If the model is missing, run
-  `omanta setup`.
+  `systemctl --user enable --now omanta`. If the download of the model
+  fails, run `omanta setup` to see the error.
 - **Agent not installed.** Settings show `(not installed)` next to the name.
   Put that agent's CLI on `PATH`, then open settings again.
 - **Not logged in.** `ctrl+l`, or settings → **Log in**.
 - **Talk key does nothing.** The agent's STT service must already be running
-  with its model loaded. Settings → **Speech to text** is Superwhisper or
-  Voxtype.
+  with its model loaded. Settings → **Speech to text** is Voxtype or
+  Superwhisper.
 - **Read-aloud misses the selection.** Copy to the clipboard, or install
   `wtype`.

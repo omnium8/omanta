@@ -1,0 +1,48 @@
+# The AUR recipe: builds the tagged release from source.
+# Publish it with the steps in RELEASING.md.
+pkgname=omanta
+pkgver=0.2.6
+pkgrel=1
+pkgdesc='Talk with any coding agent by voice: a chat TUI with a local Kokoro voice'
+arch=('x86_64' 'aarch64')
+url='https://github.com/omnium8/omanta'
+license=('MIT')
+depends=('gcc-libs' 'glibc' 'alsa-lib' 'pipewire' 'uv' 'curl' 'wl-clipboard')
+optdepends=('voxtype: speech to text for the talk key'
+            'superwhisper: speech to text for the talk key'
+            'wtype: read selections that are not in the primary selection')
+makedepends=('cargo' 'git')
+options=('!debug')
+source=("$pkgname::git+https://github.com/omnium8/omanta.git#tag=v$pkgver")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
+  cargo test --frozen --release
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm755 target/release/omanta "$pkgdir/usr/bin/omanta"
+  install -Dm644 -t "$pkgdir/usr/share/omanta/sidecar" sidecar/server.py sidecar/engines.py sidecar/pyproject.toml sidecar/uv.lock
+  install -Dm644 packaging/omanta.service "$pkgdir/usr/lib/systemd/user/omanta.service"
+  install -Dm644 packaging/omanta.desktop "$pkgdir/usr/share/applications/omanta.desktop"
+  for size in 32 64 128 256 512; do
+    install -Dm644 "packaging/icons/$size.png" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/omanta.png"
+  done
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname" README.md INSTALL.md MANUAL.md
+}

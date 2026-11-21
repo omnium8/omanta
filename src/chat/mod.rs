@@ -257,6 +257,14 @@ pub fn run(talk_now: bool) -> Result<()> {
         });
     }
 
+    // The first run after an install: start the voice service, so the chat
+    // needs no setup steps. The daemon downloads the voice model itself.
+    thread::spawn(|| {
+        if ipc::call(&paths::daemon_socket(), &Request::Status, Duration::from_secs(1)).is_err() {
+            start_voice_service();
+        }
+    });
+
     let config = Config::load();
     let mut app = App::new(config, voice_tx, tx, animate);
     if talk_now {
@@ -267,7 +275,7 @@ pub fn run(talk_now: bool) -> Result<()> {
     let mut stdout = io::stdout();
     // The title lets `omanta dictate` find this window in any terminal.
     execute!(stdout, terminal::SetTitle("omanta"), terminal::EnterAlternateScreen, EnableBracketedPaste, EnableFocusChange)?;
-    // Tells ctrl+space and esc apart cleanly where the terminal supports it.
+    // Tells alt+space and esc apart cleanly where the terminal supports it.
     let enhanced = terminal::supports_keyboard_enhancement().unwrap_or(false);
     if enhanced {
         execute!(stdout, PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES))?;
@@ -325,7 +333,7 @@ impl App {
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
-        let talk_key = KeySpec::parse(&config.chat.talk_key).unwrap_or_else(|| KeySpec::parse("ctrl+space").unwrap());
+        let talk_key = KeySpec::parse(&config.chat.talk_key).unwrap_or_else(|| KeySpec::parse("alt+space").unwrap());
         App {
             config,
             catalog,
@@ -1232,11 +1240,12 @@ fn looks_like_login(message: &str) -> bool {
         .any(|n| m.contains(n))
 }
 
-/// Starts the voice service: the systemd user unit when it is installed,
-/// otherwise `omanta daemon` in the background.
+/// Starts the voice service: the systemd user unit when it is installed
+/// (enabled, so it also starts at every login), otherwise `omanta daemon` in
+/// the background.
 pub fn start_voice_service() {
     let unit = std::process::Command::new("systemctl")
-        .args(["--user", "start", "omanta.service"])
+        .args(["--user", "enable", "--now", "omanta.service"])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()

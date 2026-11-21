@@ -1,3 +1,5 @@
+# The recipe for this checkout: bin/install and the release workflow use it.
+# The AUR recipe, which downloads the source, is aur/PKGBUILD.
 pkgname=omanta
 pkgver=0.2.6
 pkgrel=1
@@ -6,10 +8,11 @@ arch=('x86_64' 'aarch64')
 url='https://github.com/omnium8/omanta'
 license=('MIT')
 depends=('gcc-libs' 'glibc' 'alsa-lib' 'pipewire' 'uv' 'curl' 'wl-clipboard')
-optdepends=('wtype: read selections that are not in the primary selection'
+optdepends=('voxtype: speech to text for the talk key'
             'superwhisper: speech to text for the talk key'
-            'voxtype: speech to text for the talk key')
+            'wtype: read selections that are not in the primary selection')
 makedepends=('cargo')
+options=('!debug')
 source=()
 sha256sums=()
 

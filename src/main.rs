@@ -141,7 +141,7 @@ fn status() -> anyhow::Result<()> {
 
 fn setup() -> anyhow::Result<()> {
     println!("Voice model: {}", paths::model_dir().display());
-    daemon::sidecar::download_models()?;
+    daemon::sidecar::download_models(true)?;
     let sidecar = paths::sidecar_dir().ok_or_else(|| anyhow::anyhow!("sidecar/server.py is missing from the installation"))?;
     println!("Voice environment: {} (Python {})", paths::venv_dir().display(), daemon::sidecar::PYTHON);
     daemon::sidecar::ensure_env(&sidecar, true)?;

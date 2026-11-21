@@ -25,9 +25,9 @@ pub struct Chat {
     /// "key": the talk key records and sends. "dictation": your own dictation
     /// tool types into the chat line.
     pub input: String,
-    /// "superwhisper" or "voxtype", for the talk key.
+    /// "voxtype" or "superwhisper", for the talk key.
     pub stt: String,
-    /// The key that starts and stops talking, like "ctrl+space" or "f2".
+    /// The key that starts and stops talking, like "alt+space" or "f2".
     pub talk_key: String,
     /// Send dictated text after this many seconds without new text: 0 (off),
     /// 1 ("instant": as soon as the dictation tool stops typing), or 2 to 5.
@@ -69,12 +69,12 @@ impl Default for Chat {
             agent: "claude".into(),
             workdir: String::new(),
             input: "key".into(),
-            stt: "superwhisper".into(),
-            talk_key: "ctrl+space".into(),
-            send_after: 2,
+            stt: "voxtype".into(),
+            talk_key: "alt+space".into(),
+            send_after: 1,
             speak_replies: true,
             wave_rows: 1,
-            transparency: 0.0,
+            transparency: 0.4,
         }
     }
 }
@@ -83,7 +83,7 @@ impl Default for Voice {
     fn default() -> Self {
         Voice {
             name: "af_aoede".into(),
-            speed: 0.95,
+            speed: 1.1,
             volume: 1.2,
             language: "en".into(),
             pause_media: true,
@@ -123,10 +123,10 @@ impl Config {
             self.chat.input = "key".into();
         }
         if !matches!(self.chat.stt.as_str(), "superwhisper" | "voxtype") {
-            self.chat.stt = "superwhisper".into();
+            self.chat.stt = "voxtype".into();
         }
         if self.chat.talk_key.trim().is_empty() {
-            self.chat.talk_key = "ctrl+space".into();
+            self.chat.talk_key = "alt+space".into();
         }
         self.chat.send_after = match self.chat.send_after {
             0 | 1 => self.chat.send_after,
@@ -182,17 +182,17 @@ mod tests {
         let path = dir.join("config.toml");
         let mut c = Config::default();
         c.chat.agent = "opencode".into();
-        c.chat.stt = "voxtype".into();
+        c.chat.stt = "superwhisper".into();
         c.voice.speed = 9.0;
         c.save_to(&path).unwrap();
         let back = Config::load_from(&path);
         assert_eq!(back.chat.agent, "opencode");
-        assert_eq!(back.chat.stt, "voxtype");
+        assert_eq!(back.chat.stt, "superwhisper");
         assert_eq!(back.voice.speed, 2.0);
 
         fs::write(&path, "[chat]\nstt = \"nonsense\"\n").unwrap();
         let partial = Config::load_from(&path);
-        assert_eq!(partial.chat.stt, "superwhisper");
+        assert_eq!(partial.chat.stt, "voxtype");
         assert_eq!(partial.voice.name, "af_aoede");
         let _ = fs::remove_dir_all(dir);
     }

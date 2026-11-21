@@ -1,0 +1,33 @@
+#!/bin/sh
+# Makes a release:  bin/release 0.3.1
+# Sets the version in Cargo.toml and both PKGBUILDs, tests, commits, tags,
+# and pushes. The release workflow on GitHub then builds the package and
+# publishes it, with the pacman repository, on the release. See RELEASING.md.
+set -eu
+V="${1:?usage: bin/release VERSION, like 0.3.1}"
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT"
+
+if [ -n "$(git status --porcelain)" ]; then
+    echo "Commit or stash your changes first." >&2
+    exit 1
+fi
+if [ "$(git branch --show-current)" != main ]; then
+    echo "Make releases from main." >&2
+    exit 1
+fi
+if git rev-parse -q --verify "refs/tags/v$V" >/dev/null; then
+    echo "The tag v$V exists already." >&2
+    exit 1
+fi
+
+sed -i "0,/^version = /s/^version = .*/version = \"$V\"/" Cargo.toml
+sed -i "s/^pkgver=.*/pkgver=$V/; s/^pkgrel=.*/pkgrel=1/" packaging/PKGBUILD packaging/aur/PKGBUILD
+cargo update -p omanta --offline --quiet
+(cd packaging/aur && makepkg --printsrcinfo > .SRCINFO)
+cargo test --quiet
+
+git diff --quiet || git commit -qam "Release $V"
+git tag -a "v$V" -m "omanta $V"
+git push origin main "v$V"
+echo "Pushed v$V. Watch the build: gh run watch"

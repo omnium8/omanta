@@ -1,0 +1,40 @@
+#!/bin/sh
+# Builds the package from this checkout and a pacman repository around it.
+#   packaging/build-repo OUTDIR [TAG]
+# OUTDIR gets the package, omanta.db and omanta.files: the files of one
+# release. With a TAG (v1.2.3), the version in the PKGBUILD must match it.
+# When gpg has a secret key, the package and the database are signed.
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+OUT="$(mkdir -p "$1" && CDPATH= cd -- "$1" && pwd)"
+TAG="${2:-}"
+
+version="$(sed -n "s/^pkgver=//p" "$ROOT/packaging/PKGBUILD")"
+if [ -n "$TAG" ] && [ "$TAG" != "v$version" ]; then
+    echo "The tag $TAG does not match pkgver=$version in packaging/PKGBUILD." >&2
+    exit 1
+fi
+
+sign=""
+if gpg --list-secret-keys 2>/dev/null | grep -q '^sec'; then
+    sign="--sign"
+fi
+
+cd "$ROOT/packaging"
+PKGDEST="$OUT" makepkg --noconfirm --cleanbuild $sign
+rm -rf "$ROOT/packaging/src" "$ROOT/packaging/pkg"
+
+cd "$OUT"
+rm -f omanta.db* omanta.files*
+repo-add $sign omanta.db.tar.gz omanta-*.pkg.tar.zst
+# GitHub release files cannot be symlinks: store the real files under the
+# names pacman asks for.
+for f in db files; do
+    rm "omanta.$f"
+    mv "omanta.$f.tar.gz" "omanta.$f"
+    if [ -f "omanta.$f.tar.gz.sig" ]; then
+        rm -f "omanta.$f.sig"
+        mv "omanta.$f.tar.gz.sig" "omanta.$f.sig"
+    fi
+done
+ls -l "$OUT"

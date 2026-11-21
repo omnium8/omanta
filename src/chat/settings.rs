@@ -146,7 +146,7 @@ impl SettingsView {
             Row::PauseMedia => ("Pause other media", on(c.voice.pause_media), "Pause music and videos while omanta speaks."),
             Row::AllowAll => ("Auto mode", on(allow_all), "Allow every action without asking, for this run. tab turns it on and off."),
             Row::Login => ("Log in", "open the agent in a terminal".into(), ""),
-            Row::StartVoice => ("Voice service", "start".into(), "systemctl --user enable --now omanta starts it at every login."),
+            Row::StartVoice => ("Voice service", "start".into(), "Starts the voice now and at every login."),
             Row::TestVoice => ("Test the voice", "speak a sample".into(), ""),
         }
     }
@@ -170,7 +170,7 @@ impl SettingsView {
                         }
                         Row::TalkKey => {
                             if KeySpec::parse(&text).is_none() {
-                                self.error = format!("\"{text}\" is not a key. Examples: ctrl+space, alt+t, f2.");
+                                self.error = format!("\"{text}\" is not a key. Examples: alt+space, ctrl+space, f2.");
                                 return None;
                             }
                             c.chat.talk_key = text.to_lowercase();

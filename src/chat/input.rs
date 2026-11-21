@@ -1,4 +1,4 @@
-//! The one-line message editor, and the talk key as text ("ctrl+space").
+//! The one-line message editor, and the talk key as text ("alt+space").
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use unicode_width::UnicodeWidthStr;
@@ -208,7 +208,7 @@ impl Dictation {
     }
 }
 
-/// A key from the config, like "ctrl+space", "alt+t" or "f2".
+/// A key from the config, like "alt+space", "ctrl+t" or "f2".
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeySpec {
     pub code: KeyCode,

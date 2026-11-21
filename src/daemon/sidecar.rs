@@ -43,20 +43,27 @@ pub fn models_present() -> bool {
     MODEL_FILES.iter().all(|f| paths::model_dir().join(f).is_file())
 }
 
-/// Downloads the Kokoro model files (about 340 MB) with curl. For `omanta setup`.
-pub fn download_models() -> anyhow::Result<()> {
+/// Downloads the Kokoro model files (about 340 MB) with curl. `verbose` shows
+/// the progress (for `omanta setup`).
+pub fn download_models(verbose: bool) -> anyhow::Result<()> {
     let dir = paths::model_dir();
     std::fs::create_dir_all(&dir)?;
     for f in MODEL_FILES {
         let target = dir.join(f);
         if target.is_file() {
-            println!("have {}", target.display());
+            if verbose {
+                println!("have {}", target.display());
+            }
             continue;
         }
-        println!("downloading {f} …");
-        let part = dir.join(format!("{f}.part"));
+        if verbose {
+            println!("downloading {f} …");
+        }
+        // One part file per process, so `omanta setup` and the daemon never
+        // write the same file.
+        let part = dir.join(format!("{f}.{}.part", std::process::id()));
         let ok = Command::new("curl")
-            .args(["-L", "--fail", "--progress-bar", "-o"])
+            .args(["-L", "--fail", "--retry", "3", if verbose { "--progress-bar" } else { "--silent" }, "-o"])
             .arg(&part)
             .arg(format!("{MODEL_URL}/{f}"))
             .status()?
@@ -147,9 +154,12 @@ pub fn supervise(health: Shared, child: Arc<Mutex<Option<Child>>>, port: u16, vo
     let mut failures = 0u32;
     loop {
         if !models_present() {
-            set(&health, "error", "the voice model is missing: run `omanta setup`", false);
-            sleep(Duration::from_secs(5));
-            continue;
+            set(&health, "downloading", "", false);
+            if let Err(e) = download_models(false) {
+                set(&health, "error", &format!("{e}: check the network, or run `omanta setup`"), false);
+                sleep(Duration::from_secs(30));
+                continue;
+            }
         }
         if let Some(h) = healthy(port) {
             if h["engine"].is_null() && !h["loading"].as_bool().unwrap_or(false) {

@@ -62,7 +62,7 @@ impl Stt {
     pub fn new() -> Stt {
         let dir = paths::runtime_dir().join("stt");
         let _ = std::fs::create_dir_all(&dir);
-        Stt { engine: "superwhisper".into(), state: State::Idle, recorder: None, dir }
+        Stt { engine: "voxtype".into(), state: State::Idle, recorder: None, dir }
     }
 
     pub fn state(&self) -> State {
