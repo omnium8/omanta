@@ -24,8 +24,11 @@ The tag starts the workflow `.github/workflows/release.yml`. Watch it with
 3. attaches the package and the database to the GitHub release, and marks
    the release as the latest.
 
-To build an existing tag again: **Actions** → **release** → **Run
-workflow**, with the tag.
+If no run starts, or to build an existing tag again, start it by hand:
+
+```sh
+gh workflow run release.yml -f tag=v0.3.1
+```
 
 ## How the pacman repository works
 

@@ -32,7 +32,7 @@ jobs:
       - name: Install the build tools
         run: pacman -Syu --noconfirm --needed git github-cli rust alsa-lib pipewire uv curl wl-clipboard
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.TAG }}
 
