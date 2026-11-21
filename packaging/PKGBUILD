@@ -29,7 +29,7 @@ package() {
   install -Dm644 -t "$pkgdir/usr/share/omanta/sidecar" sidecar/server.py sidecar/engines.py sidecar/pyproject.toml sidecar/uv.lock
   install -Dm644 packaging/omanta.service "$pkgdir/usr/lib/systemd/user/omanta.service"
   install -Dm644 packaging/omanta.desktop "$pkgdir/usr/share/applications/omanta.desktop"
-  # The Omanta waveform icon, as the Tauri app shipped it.
+  # The Omanta waveform icon.
   for size in 32 64 128 256 512; do
     install -Dm644 "packaging/icons/$size.png" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/omanta.png"
   done

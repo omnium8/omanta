@@ -24,7 +24,10 @@ Copilot, Qwen, Kimi, and Hermes are supported. The agent keeps its own login.
 
 ## Install
 
-On Omarchy or Arch, from a clone of this repository:
+omanta needs Omarchy or Arch Linux with PipeWire, Rust (`cargo`), `uv`, and
+one coding-agent CLI. The full list is in [INSTALL.md](INSTALL.md).
+
+From a clone of this repository:
 
 ```sh
 bin/install
@@ -35,6 +38,21 @@ the voice service. Full steps, uninstall, and a checkout-only build:
 [INSTALL.md](INSTALL.md).
 
 Keys, agents, settings, and troubleshooting: [MANUAL.md](MANUAL.md).
+
+## Status and feedback
+
+omanta is young software. Report problems and ideas in
+[Issues](https://github.com/omnium8/omanta/issues). Tell which agent, which
+speech-to-text tool, and which terminal you use.
+
+omanta is a community project. It is not part of Omarchy or Basecamp.
+
+## Credits
+
+The voice is [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) (Apache 2.0),
+through [kokoro-onnx](https://github.com/thewh1teagle/kokoro-onnx). The voice
+runs on your machine. Your agent CLI still sends your messages to its own
+provider.
 
 ## License
 
