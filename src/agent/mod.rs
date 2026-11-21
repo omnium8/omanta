@@ -137,6 +137,10 @@ pub enum Event {
     Retrying(String),
     /// The model it runs and its effort level, short, like "opus 5.5 · high".
     Model(String),
+    /// The models and effort levels it lets the user choose from.
+    Choices(Choices),
+    /// Something to tell the user, like a change it refused.
+    Note(String),
     /// It cannot go on (not logged in, no session).
     Failed(String),
 }
@@ -154,6 +158,82 @@ pub trait Link: Send {
     fn read(&mut self, line: &str) -> Vec<Event>;
     /// Lines to write to the agent's stdin, oldest first.
     fn drain(&mut self) -> Vec<String>;
+    /// Changes the model or the effort to `value`, one of its `Choices`.
+    fn choose(&mut self, _what: Choosable, _value: &str) -> Vec<Event> {
+        vec![]
+    }
+}
+
+/// What the user can choose for an agent.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Choosable {
+    Model,
+    Effort,
+}
+
+impl Choosable {
+    pub fn word(self) -> &'static str {
+        match self {
+            Choosable::Model => "model",
+            Choosable::Effort => "effort",
+        }
+    }
+}
+
+/// One value the agent offers, like a model.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Choice {
+    pub value: String,
+    pub name: String,
+}
+
+/// A setting the agent lets the user change, and the values it takes.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Setting {
+    /// The id of its ACP config option. Empty: the model, set with `session/set_model`.
+    pub id: String,
+    pub current: String,
+    pub choices: Vec<Choice>,
+}
+
+impl Setting {
+    /// The name of the current value.
+    pub fn current_name(&self) -> String {
+        self.choices.iter().find(|c| c.value == self.current).map(|c| c.name.clone()).unwrap_or_else(|| self.current.clone())
+    }
+
+    /// The choices that `wanted` names: its number in the list (from 1), its
+    /// value or its name, or else a part of them. More than one is ambiguous.
+    pub fn find(&self, wanted: &str) -> Vec<&Choice> {
+        let w = wanted.trim().to_lowercase();
+        if w.is_empty() {
+            return vec![];
+        }
+        if let Some(c) = w.parse::<usize>().ok().and_then(|n| self.choices.get(n.wrapping_sub(1))) {
+            return vec![c];
+        }
+        let exact: Vec<&Choice> = self.choices.iter().filter(|c| c.value.to_lowercase() == w || c.name.to_lowercase() == w).collect();
+        if !exact.is_empty() {
+            return exact;
+        }
+        self.choices.iter().filter(|c| c.value.to_lowercase().contains(&w) || c.name.to_lowercase().contains(&w)).collect()
+    }
+}
+
+/// The models and effort levels the agent offers; `None` when it offers no choice.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Choices {
+    pub model: Option<Setting>,
+    pub effort: Option<Setting>,
+}
+
+impl Choices {
+    pub fn get(&self, what: Choosable) -> Option<&Setting> {
+        match what {
+            Choosable::Model => self.model.as_ref(),
+            Choosable::Effort => self.effort.as_ref(),
+        }
+    }
 }
 
 pub fn create(agent: &AgentInfo) -> Box<dyn Link> {
@@ -235,6 +315,24 @@ mod tests {
         assert_eq!(Act::new("tool", "").to_do(), "use a tool");
         assert_eq!(Act::new("edit", "main.rs").doing(), "editing main.rs");
         assert_eq!(Act::new("read", "").doing(), "reading a file");
+    }
+
+    #[test]
+    fn finds_choices_by_number_value_name_or_part() {
+        let choice = |v: &str, n: &str| Choice { value: v.into(), name: n.into() };
+        let s = Setting {
+            id: "model".into(),
+            current: "opencode/beam-free".into(),
+            choices: vec![choice("opencode/beam-free", "Beam Free"), choice("opencode/big-pickle", "Big Pickle"), choice("anthropic/beam", "Beam")],
+        };
+        assert_eq!(s.find("2")[0].value, "opencode/big-pickle");
+        assert_eq!(s.find("beam")[0].value, "anthropic/beam");
+        assert_eq!(s.find("Big Pickle").len(), 1);
+        assert_eq!(s.find("pickle").len(), 1);
+        assert_eq!(s.find("opencode").len(), 2);
+        assert!(s.find("9").is_empty());
+        assert!(s.find("").is_empty());
+        assert_eq!(s.current_name(), "Beam Free");
     }
 
     #[test]

@@ -578,7 +578,7 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
     let mut cursor = None;
     for (i, row) in ROWS.iter().enumerate() {
-        let (label, value, _) = view.describe(*row, &app.config, &app.catalog, app.allow_all);
+        let (label, value, _) = view.describe(*row, &app.config, &app.catalog, app.allow_all, app.choices.as_ref(), &app.model);
         let selected = i == view.selected;
         let label_style = if selected { Style::new().fg(accent).bold() } else { Style::new() };
         let mark = if selected { "▸ " } else { "  " };
@@ -598,7 +598,7 @@ fn draw_settings(f: &mut Frame, app: &App, area: Rect) {
         ]));
     }
     lines.push(Line::raw(""));
-    let (_, _, hint) = view.describe(view.row(), &app.config, &app.catalog, app.allow_all);
+    let (_, _, hint) = view.describe(view.row(), &app.config, &app.catalog, app.allow_all, app.choices.as_ref(), &app.model);
     if !view.error.is_empty() {
         lines.push(Line::styled(view.error.clone(), Style::new().fg(Color::Red)));
     } else {

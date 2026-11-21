@@ -1,5 +1,6 @@
 //! The user's choices, in ~/.config/omanta/config.toml. Saved atomically.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -41,6 +42,11 @@ pub struct Chat {
     /// How much of the wallpaper shows through the background: 0 (off: the
     /// terminal's own setting), or 0.1 to 0.9. Needs foot.
     pub transparency: f32,
+    /// The model chosen for each agent, by agent id. omanta sets it again at
+    /// every start. Empty: the agent's own default.
+    pub models: BTreeMap<String, String>,
+    /// The effort level chosen for each agent, by agent id.
+    pub efforts: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -75,6 +81,8 @@ impl Default for Chat {
             speak_replies: true,
             wave_rows: 1,
             transparency: 0.4,
+            models: BTreeMap::new(),
+            efforts: BTreeMap::new(),
         }
     }
 }
@@ -184,9 +192,11 @@ mod tests {
         c.chat.agent = "opencode".into();
         c.chat.stt = "superwhisper".into();
         c.voice.speed = 9.0;
+        c.chat.models.insert("cursor-agent".into(), "gpt-5.6[effort=high,fast=true]".into());
         c.save_to(&path).unwrap();
         let back = Config::load_from(&path);
         assert_eq!(back.chat.agent, "opencode");
+        assert_eq!(back.chat.models.get("cursor-agent").map(String::as_str), Some("gpt-5.6[effort=high,fast=true]"));
         assert_eq!(back.chat.stt, "superwhisper");
         assert_eq!(back.voice.speed, 2.0);
 

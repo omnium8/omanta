@@ -6,7 +6,7 @@ use std::collections::{HashMap, VecDeque};
 
 use serde_json::{json, Value};
 
-use super::{always_key, file_name, first_string, short, Act, Event, Link};
+use super::{always_key, file_name, first_string, short, Act, Choice, Choices, Choosable, Event, Link, Setting};
 use crate::speech::VOICE_PROMPT;
 
 /// What an answer to one of our calls is for.
@@ -16,6 +16,8 @@ enum Pending {
     Load,
     New,
     Prompt,
+    /// A change of model or effort; the state before it, to go back to if refused.
+    Set { models: Value, options: Value },
 }
 
 pub struct Acp {
@@ -37,6 +39,9 @@ pub struct Acp {
     asked: HashMap<String, (Value, Vec<Value>)>,
     /// Our id -> the request's id, the form's one field, whether it takes a list.
     questions: HashMap<String, (Value, String, bool)>,
+    /// The latest `models` and `configOptions` the agent sent.
+    models: Value,
+    options: Value,
     outbox: Vec<String>,
 }
 
@@ -146,6 +151,8 @@ impl Acp {
             queue: VecDeque::new(),
             asked: HashMap::new(),
             questions: HashMap::new(),
+            models: Value::Null,
+            options: Value::Null,
             outbox: Vec::new(),
         }
     }
@@ -192,9 +199,7 @@ impl Acp {
     fn answered(&mut self, pending: Pending, result: &Value, error: &Value) -> Vec<Event> {
         let mut out = Vec::new();
         let failed = !error.is_null();
-        if let Some(label) = model_label(&result["models"], &result["configOptions"]) {
-            out.push(Event::Model(label));
-        }
+        out.extend(self.learn(&result["models"], &result["configOptions"]));
         match pending {
             Pending::Initialize => {
                 self.auth_methods = result["authMethods"]
@@ -244,6 +249,14 @@ impl Acp {
                     self.new_session();
                 }
             }
+            Pending::Set { models, options } => {
+                if failed {
+                    self.models = models;
+                    self.options = options;
+                    out.extend(self.learned());
+                    out.push(Event::Note(format!("The agent did not make the change: {}", reason(error))));
+                }
+            }
             Pending::Prompt => {
                 self.in_flight = false;
                 out.push(Event::Done {
@@ -253,6 +266,31 @@ impl Acp {
                 self.next();
             }
         }
+        out
+    }
+
+    /// Keeps new `models` or `configOptions`, and tells what changed.
+    fn learn(&mut self, models: &Value, options: &Value) -> Vec<Event> {
+        let mut changed = false;
+        if models.is_object() {
+            self.models = models.clone();
+            changed = true;
+        }
+        if options.is_array() {
+            self.options = options.clone();
+            changed = true;
+        }
+        if changed {
+            self.learned()
+        } else {
+            vec![]
+        }
+    }
+
+    /// The label and the choices, from what the agent sent last.
+    fn learned(&self) -> Vec<Event> {
+        let mut out: Vec<Event> = model_label(&self.models, &self.options).map(Event::Model).into_iter().collect();
+        out.push(Event::Choices(choices(&self.models, &self.options)));
         out
     }
 
@@ -271,23 +309,66 @@ impl Acp {
             }
             "tool_call" => vec![Event::Working, Event::Step(act(u))],
             "agent_thought_chunk" => vec![Event::Thinking],
-            "config_option_update" => model_label(&Value::Null, &u["configOptions"]).map(Event::Model).into_iter().collect(),
+            "config_option_update" => self.learn(&Value::Null, &u["configOptions"]),
             _ => vec![],
         }
     }
 }
 
-/// The session's model and effort, like "grok 4.6 · high", from ACP's
-/// `models` (with Grok's and Cursor's effort in it) or `configOptions`.
-fn model_label(models: &Value, options: &Value) -> Option<String> {
-    let option = |category: &str| {
-        options.as_array()?.iter().find(|o| o["category"] == category).and_then(|o| {
-            let value = o["currentValue"].as_str()?;
-            let named = o["options"].as_array().and_then(|l| l.iter().find(|c| c["value"] == value)).and_then(|c| c["name"].as_str());
-            Some(named.unwrap_or(value).to_string())
-        })
+/// The config option for the model or the effort, if the agent has one.
+fn config_option(options: &Value, what: Choosable) -> Option<&Value> {
+    let (category, ids): (&str, &[&str]) = match what {
+        Choosable::Model => ("model", &["model"]),
+        Choosable::Effort => ("thought_level", &["effort", "reasoning_effort", "thought_level"]),
     };
-    let current = models["currentModelId"].as_str();
+    let list = options.as_array()?;
+    list.iter().find(|o| o["category"] == category).or_else(|| list.iter().find(|o| ids.iter().any(|i| o["id"] == *i)))
+}
+
+/// An option's values, with the values in groups taken out of their groups.
+fn option_choices(option: &Value) -> Vec<Choice> {
+    let mut out = Vec::new();
+    for o in option["options"].as_array().into_iter().flatten() {
+        let inner = o["options"].as_array().map(|l| l.iter().collect::<Vec<_>>()).unwrap_or_else(|| vec![o]);
+        for c in inner {
+            if let Some(value) = c["value"].as_str() {
+                let name = c["name"].as_str().filter(|n| !n.is_empty()).unwrap_or(value);
+                out.push(Choice { value: value.to_string(), name: name.to_string() });
+            }
+        }
+    }
+    out
+}
+
+/// What the user can choose: from `configOptions`, else the model from `models`.
+fn choices(models: &Value, options: &Value) -> Choices {
+    let setting = |o: &Value| Setting {
+        id: o["id"].as_str().unwrap_or("").to_string(),
+        current: o["currentValue"].as_str().unwrap_or("").to_string(),
+        choices: option_choices(o),
+    };
+    let listed: Vec<Choice> = models["availableModels"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| {
+            let value = m["modelId"].as_str()?;
+            let name = m["name"].as_str().filter(|n| !n.is_empty()).unwrap_or(value);
+            Some(Choice { value: value.to_string(), name: name.to_string() })
+        })
+        .collect();
+    let model = config_option(options, Choosable::Model).map(setting).filter(|s| !s.id.is_empty()).or_else(|| {
+        (!listed.is_empty()).then(|| Setting { id: String::new(), current: models["currentModelId"].as_str().unwrap_or("").to_string(), choices: listed })
+    });
+    let effort = config_option(options, Choosable::Effort).map(setting).filter(|s| !s.id.is_empty() && !s.choices.is_empty());
+    Choices { model, effort }
+}
+
+/// The session's model and effort, like "grok 4.6 · high", from ACP's
+/// `configOptions`, or `models` (with Grok's and Cursor's effort in it).
+fn model_label(models: &Value, options: &Value) -> Option<String> {
+    let model_option = config_option(options, Choosable::Model);
+    let current = model_option.and_then(|o| o["currentValue"].as_str()).or_else(|| models["currentModelId"].as_str());
     let entry = current.and_then(|c| models["availableModels"].as_array()?.iter().find(|m| m["modelId"] == c));
     // Cursor puts settings in the id: "gpt-5[effort=high,fast=true]".
     let (bare, settings) = match current {
@@ -297,11 +378,12 @@ fn model_label(models: &Value, options: &Value) -> Option<String> {
         },
         None => ("", ""),
     };
-    let model = entry.and_then(|m| m["name"].as_str()).map(str::to_string).or_else(|| (!bare.is_empty()).then(|| bare.to_string())).or_else(|| option("model"))?;
-    let effort = entry
-        .and_then(|m| m["_meta"]["reasoningEffort"].as_str().map(str::to_string))
-        .or_else(|| settings.split(',').find_map(|kv| kv.split_once('=').filter(|(k, _)| k.ends_with("effort")).map(|(_, v)| v.to_string())))
-        .or_else(|| option("thought_level"));
+    let named = model_option.and_then(|o| option_choices(o).into_iter().find(|c| Some(c.value.as_str()) == current)).map(|c| c.name);
+    let model = named.or_else(|| entry.and_then(|m| m["name"].as_str()).map(str::to_string)).or_else(|| (!bare.is_empty()).then(|| bare.to_string()))?;
+    let effort = config_option(options, Choosable::Effort)
+        .and_then(|o| o["currentValue"].as_str().map(str::to_string))
+        .or_else(|| entry.and_then(|m| m["_meta"]["reasoningEffort"].as_str().map(str::to_string)))
+        .or_else(|| settings.split(',').find_map(|kv| kv.split_once('=').filter(|(k, _)| k.ends_with("effort")).map(|(_, v)| v.to_string())));
     let mut label = model.to_lowercase();
     if let Some(e) = effort.filter(|e| !e.is_empty()) {
         label.push_str(" · ");
@@ -379,7 +461,7 @@ impl Link for Acp {
         }
         let params = &ev["params"];
         match (method, id) {
-            ("_x.ai/models/update", _) => model_label(params, &Value::Null).map(Event::Model).into_iter().collect(),
+            ("_x.ai/models/update", _) => self.learn(params, &Value::Null),
             ("session/update", _) => {
                 if self.loading {
                     vec![]
@@ -436,6 +518,23 @@ impl Link for Acp {
     fn drain(&mut self) -> Vec<String> {
         std::mem::take(&mut self.outbox)
     }
+
+    fn choose(&mut self, what: Choosable, value: &str) -> Vec<Event> {
+        let Some(session) = self.session.clone() else { return vec![] };
+        let Some(setting) = choices(&self.models, &self.options).get(what).cloned() else { return vec![] };
+        let before = Pending::Set { models: self.models.clone(), options: self.options.clone() };
+        if setting.id.is_empty() {
+            self.models["currentModelId"] = json!(value);
+            self.call("session/set_model", json!({"sessionId": session, "modelId": value}), before);
+        } else {
+            // Shown at once; the agent's answer has the options as they are then.
+            if let Some(o) = self.options.as_array_mut().and_then(|l| l.iter_mut().find(|o| o["id"] == setting.id.as_str())) {
+                o["currentValue"] = json!(value);
+            }
+            self.call("session/set_config_option", json!({"sessionId": session, "configId": setting.id, "value": value}), before);
+        }
+        self.learned()
+    }
 }
 
 #[cfg(test)]
@@ -453,6 +552,80 @@ mod tests {
         let options = json!([{"category": "model", "currentValue": "m1", "options": [{"value": "m1", "name": "Sonic"}]}, {"category": "thought_level", "currentValue": "low"}]);
         assert_eq!(model_label(&Value::Null, &options).as_deref(), Some("sonic · low"));
         assert_eq!(model_label(&Value::Null, &Value::Null), None);
+    }
+
+    #[test]
+    fn options_win_over_models_in_the_label() {
+        // Grok sends both; after a change of effort only the options are new.
+        let models = json!({"currentModelId": "grok-4.6", "availableModels": [{"modelId": "grok-4.6", "name": "Grok 4.6", "_meta": {"reasoningEffort": "high"}}, {"modelId": "grok-4.7", "name": "Grok 4.7"}]});
+        let options = json!([{"id": "model", "category": "model", "currentValue": "grok-4.7", "options": [{"value": "grok-4.6", "name": "Grok 4.6"}, {"value": "grok-4.7", "name": "Grok 4.7"}]}, {"id": "reasoning_effort", "category": "thought_level", "currentValue": "low", "options": [{"value": "low", "name": "Low"}]}]);
+        assert_eq!(model_label(&models, &options).as_deref(), Some("grok 4.7 · low"));
+        // Cursor: the effort is in the id of the model option.
+        let cursor = json!([{"id": "model", "category": "model", "currentValue": "gpt-5.6[effort=high]", "options": [{"value": "gpt-5.6[effort=high]", "name": "gpt-5.6"}]}]);
+        assert_eq!(model_label(&Value::Null, &cursor).as_deref(), Some("gpt-5.6 · high"));
+    }
+
+    #[test]
+    fn reads_choices() {
+        let grouped = json!([
+            {"id": "model", "category": "model", "currentValue": "b", "options": [{"group": "x", "name": "X", "options": [{"value": "a", "name": "A"}, {"value": "b"}]}]},
+            {"id": "effort", "currentValue": "low", "options": [{"value": "low", "name": "Low"}, {"value": "high", "name": "High"}]},
+            {"id": "mode", "category": "mode", "currentValue": "build", "options": [{"value": "build"}]}
+        ]);
+        let c = choices(&Value::Null, &grouped);
+        let model = c.model.unwrap();
+        assert_eq!((model.id.as_str(), model.current.as_str(), model.choices.len()), ("model", "b", 2));
+        assert_eq!(model.choices[1], Choice { value: "b".into(), name: "b".into() });
+        assert_eq!(c.effort.unwrap().current_name(), "Low");
+        // Only `models`: the model is set with session/set_model, and there is no effort.
+        let models = json!({"currentModelId": "m1", "availableModels": [{"modelId": "m1", "name": "One"}, {"modelId": "m2", "name": "Two"}]});
+        let c = choices(&models, &Value::Null);
+        assert_eq!(c.model.as_ref().map(|m| (m.id.as_str(), m.current_name())), Some(("", "One".to_string())));
+        assert!(c.effort.is_none());
+        assert_eq!(choices(&Value::Null, &Value::Null), Choices::default());
+    }
+
+    fn ready(a: &mut Acp, session: &str) -> Vec<Event> {
+        a.open(None, "/home/x");
+        a.read(r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}"#);
+        a.drain();
+        a.read(session)
+    }
+
+    #[test]
+    fn changes_model_and_effort() {
+        let mut a = Acp::new(vec![]);
+        let ev = ready(&mut a, r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s","configOptions":[{"id":"model","category":"model","currentValue":"a","options":[{"value":"a","name":"A"},{"value":"b","name":"B"}]},{"id":"effort","category":"thought_level","currentValue":"low","options":[{"value":"low"},{"value":"high"}]}]}}"#);
+        assert_eq!(ev[0], Event::Model("a · low".into()));
+        assert!(matches!(&ev[1], Event::Choices(c) if c.model.is_some() && c.effort.is_some()));
+
+        let ev = a.choose(Choosable::Model, "b");
+        assert_eq!(ev[0], Event::Model("b · low".into()));
+        let sent = last(&mut a);
+        assert_eq!(sent["method"], "session/set_config_option");
+        assert_eq!(sent["params"], json!({"sessionId": "s", "configId": "model", "value": "b"}));
+
+        // Refused: back to what it was, and the user hears why.
+        let ev = a.read(&format!(r#"{{"jsonrpc":"2.0","id":{},"error":{{"code":-32602,"message":"no such model"}}}}"#, sent["id"]));
+        assert_eq!(ev[0], Event::Model("a · low".into()));
+        assert_eq!(ev.last(), Some(&Event::Note("The agent did not make the change: no such model".into())));
+
+        a.choose(Choosable::Effort, "high");
+        assert_eq!(last(&mut a)["params"]["configId"], "effort");
+    }
+
+    #[test]
+    fn changes_model_with_set_model() {
+        let mut a = Acp::new(vec![]);
+        ready(&mut a, r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"s","models":{"currentModelId":"m1","availableModels":[{"modelId":"m1","name":"One"},{"modelId":"m2","name":"Two"}]}}}"#);
+        let ev = a.choose(Choosable::Model, "m2");
+        assert_eq!(ev[0], Event::Model("two".into()));
+        let sent = last(&mut a);
+        assert_eq!(sent["method"], "session/set_model");
+        assert_eq!(sent["params"], json!({"sessionId": "s", "modelId": "m2"}));
+        // Nothing to choose: nothing is sent.
+        assert!(a.choose(Choosable::Effort, "high").is_empty());
+        assert!(a.drain().is_empty());
     }
 
     fn last(a: &mut Acp) -> Value {

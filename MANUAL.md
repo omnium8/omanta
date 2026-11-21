@@ -53,6 +53,24 @@ itself would ask.
 Pick the agent and the working folder in settings. The working folder takes
 effect on the next conversation (`ctrl+n`).
 
+### Model and effort
+
+omanta runs its own copy of the agent. A model that you choose in the agent's
+TUI in a different terminal does not change the model in omanta. Choose the
+model and the effort level of an ACP agent in omanta:
+
+- In the chat, type `/model` to see the models of the agent. Type `/model` and
+  a number or a name to change the model, for example `/model 3` or
+  `/model sonnet`. `/effort` does the same for the effort level.
+- In settings (`ctrl+o`), use the **Model** and **Effort** rows. When the
+  agent does not run yet, press enter to start it.
+
+The change takes effect at once. omanta keeps the choice for each agent in
+the config file and sets it again at the next start. Some agents put the
+effort in the model, like Cursor Agent. For these agents, choose a model with
+the effort that you want. These commands and rows are not available for
+Claude Code.
+
 ## How a conversation works
 
 1. **Speech in.** In settings (`ctrl+o`), choose one:

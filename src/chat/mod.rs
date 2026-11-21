@@ -25,7 +25,7 @@ use ratatui::Terminal;
 use serde_json::json;
 
 use crate::agent::process::{Output, Process};
-use crate::agent::{self, Act, AgentInfo, Event, Link};
+use crate::agent::{self, Act, AgentInfo, Choices, Choosable, Event, Link};
 use crate::config::Config;
 use crate::ipc::{self, Request, Status};
 use crate::paths;
@@ -143,6 +143,11 @@ pub struct App {
     pub walk: f64,
     /// The agent's model and effort, shown before the voice status.
     pub model: String,
+    /// The models and effort levels the running agent offers. `None`: no
+    /// agent runs yet, so they are not known.
+    pub choices: Option<Choices>,
+    /// A /model or /effort typed before the agent was ready.
+    pending_command: Option<String>,
     /// When the chat opened: the clock for the animations.
     pub born: Instant,
     /// Something on the screen moves: draw frames faster.
@@ -369,6 +374,8 @@ impl App {
             see_through_set: false,
             walk: 0.0,
             model: String::new(),
+            choices: None,
+            pending_command: None,
             born: Instant::now(),
             animate,
             levels: levels::Levels::start(),
@@ -531,7 +538,7 @@ impl App {
                 return;
             }
             Overlay::Settings(view) => {
-                if let Some(action) = view.key(&k, &mut self.config, &self.catalog) {
+                if let Some(action) = view.key(&k, &mut self.config, &self.catalog, self.choices.as_ref()) {
                     self.settings_action(action);
                 }
                 return;
@@ -635,6 +642,12 @@ impl App {
             }
             settings::Action::StartVoice => start_voice_service(),
             settings::Action::TestVoice => self.say("This is how replies will sound."),
+            settings::Action::Choose(what, value) => self.set_choice(what, &value),
+            settings::Action::LoadChoices => {
+                if self.process.is_none() {
+                    self.start_process();
+                }
+            }
         }
     }
 
@@ -646,6 +659,7 @@ impl App {
             return;
         };
         self.model.clear();
+        self.choices = None;
         let mut link = agent::create(&self.agent);
         let args = link.arguments(self.session.as_deref());
         let cwd = self.config.workdir();
@@ -675,6 +689,8 @@ impl App {
             thread::spawn(move || p.stop());
         }
         self.link = None;
+        self.choices = None;
+        self.pending_command = None;
         self.starting = false;
         self.set_busy(false);
     }
@@ -715,6 +731,8 @@ impl App {
                 self.ask = None;
                 self.question = None;
                 self.pending_prompt = None;
+                self.pending_command = None;
+                self.choices = None;
                 self.set_busy(false);
             }
         }
@@ -729,6 +747,13 @@ impl App {
             }
             Event::Ready => {
                 self.starting = false;
+                self.choices.get_or_insert_with(Choices::default);
+                self.apply_saved_choices();
+                if let Some(text) = self.pending_command.take() {
+                    if let Some((what, arg)) = self.choice_command(&text) {
+                        self.run_choice_command(what, &arg, &text);
+                    }
+                }
                 if let Some(text) = self.pending_prompt.take() {
                     if let Some(l) = self.link.as_mut() {
                         l.prompt(&text);
@@ -790,6 +815,8 @@ impl App {
                 }
             }
             Event::Model(label) => self.model = label,
+            Event::Choices(c) => self.choices = Some(c),
+            Event::Note(text) => self.note(&text),
             Event::Retrying(err) => self.note(&format!("retrying: {err}")),
             Event::Failed(message) => {
                 if looks_like_login(&message) {
@@ -810,6 +837,11 @@ impl App {
     fn send(&mut self, raw: &str) {
         let text = raw.trim().to_string();
         if text.is_empty() {
+            return;
+        }
+        if let Some((what, arg)) = self.choice_command(&text) {
+            self.push(Kind::User, text.clone());
+            self.run_choice_command(what, &arg, &text);
             return;
         }
         if let Some(ask) = &self.ask {
@@ -851,6 +883,110 @@ impl App {
         } else if let Some(l) = self.link.as_mut() {
             l.prompt(text);
             self.flush_link();
+        }
+    }
+
+    /// `/model` or `/effort` and what follows it. Only ACP agents: Claude
+    /// Code gets its own /model.
+    fn choice_command(&self, text: &str) -> Option<(Choosable, String)> {
+        if self.agent.id == "claude" {
+            return None;
+        }
+        let (name, rest) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+        let what = match name {
+            "/model" => Choosable::Model,
+            "/effort" => Choosable::Effort,
+            _ => return None,
+        };
+        Some((what, rest.trim().to_string()))
+    }
+
+    /// Lists the models or effort levels, or changes to the one `arg` names.
+    fn run_choice_command(&mut self, what: Choosable, arg: &str, text: &str) {
+        let name = self.agent.name;
+        let word = what.word();
+        let Some(choices) = self.choices.clone() else {
+            // The agent tells its choices when it starts: start it, and do this then.
+            if self.process.is_none() {
+                self.start_process();
+            }
+            if self.process.is_some() {
+                self.pending_command = Some(text.to_string());
+            }
+            return;
+        };
+        let Some(setting) = choices.get(what) else {
+            if what == Choosable::Effort && choices.model.is_some() && self.model.contains(" · ") {
+                self.note(&format!("{name} sets the effort with the model. Choose a model with /model."));
+            } else {
+                self.note(&format!("{name} does not offer a choice of {word} here."));
+            }
+            return;
+        };
+        if arg.is_empty() {
+            let heading = if what == Choosable::Model { "Models" } else { "Effort levels" };
+            self.note(&format!("{heading} of {name}. Type /{word} and a number or a name to change it."));
+            for (i, c) in setting.choices.iter().enumerate() {
+                let mark = if c.value == setting.current { "▸" } else { " " };
+                let shown = if c.name == c.value { c.name.clone() } else { format!("{}  ({})", c.name, c.value) };
+                self.note(&format!("{mark} {:>2}. {shown}", i + 1));
+            }
+            return;
+        }
+        let found = setting.find(arg);
+        match found.as_slice() {
+            [] => self.note(&format!("No {word} matches \"{arg}\". Type /{word} to see the list.")),
+            [one] => {
+                let (value, chosen) = (one.value.clone(), one.name.clone());
+                self.set_choice(what, &value);
+                self.note(&format!("{word}: {chosen}"));
+            }
+            many => {
+                let mut names: Vec<String> = many.iter().take(6).map(|c| c.name.clone()).collect();
+                if many.len() > 6 {
+                    names.push("…".into());
+                }
+                self.note(&format!("\"{arg}\" matches more than one {word}: {}. Type /{word} to see the numbers.", names.join(", ")));
+            }
+        }
+    }
+
+    /// Tells the agent to change its model or effort, and keeps the choice
+    /// for the next start.
+    fn set_choice(&mut self, what: Choosable, value: &str) {
+        let events = self.link.as_mut().map(|l| l.choose(what, value)).unwrap_or_default();
+        self.flush_link();
+        for e in events {
+            self.agent_event(e);
+        }
+        let saved = match what {
+            Choosable::Model => &mut self.config.chat.models,
+            Choosable::Effort => &mut self.config.chat.efforts,
+        };
+        saved.insert(self.agent.id.to_string(), value.to_string());
+        if let Err(e) = self.config.save() {
+            self.note(&format!("Could not save the settings: {e}"));
+        }
+    }
+
+    /// Sets the model and effort chosen earlier for this agent, when the
+    /// agent still offers them.
+    fn apply_saved_choices(&mut self) {
+        for what in [Choosable::Model, Choosable::Effort] {
+            let saved = match what {
+                Choosable::Model => self.config.chat.models.get(self.agent.id),
+                Choosable::Effort => self.config.chat.efforts.get(self.agent.id),
+            };
+            let Some(value) = saved.cloned() else { continue };
+            let Some(setting) = self.choices.as_ref().and_then(|c| c.get(what)) else { continue };
+            if setting.current == value || !setting.choices.iter().any(|c| c.value == value) {
+                continue;
+            }
+            let events = self.link.as_mut().map(|l| l.choose(what, &value)).unwrap_or_default();
+            self.flush_link();
+            for e in events {
+                self.agent_event(e);
+            }
         }
     }
 
@@ -944,6 +1080,7 @@ impl App {
         self.ask = None;
         self.question = None;
         self.pending_prompt = None;
+        self.pending_command = None;
         self.needs_login = false;
         self.scroll = 0;
     }

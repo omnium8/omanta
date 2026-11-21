@@ -4,7 +4,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use super::input::{KeySpec, LineInput};
-use crate::agent::AgentInfo;
+use crate::agent::{AgentInfo, Choices, Choosable};
 use crate::config::Config;
 
 pub enum Action {
@@ -14,11 +14,17 @@ pub enum Action {
     Login,
     StartVoice,
     TestVoice,
+    /// Change the agent's model or effort to this value.
+    Choose(Choosable, String),
+    /// Start the agent, so it tells its models.
+    LoadChoices,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Row {
     Agent,
+    Model,
+    Effort,
     Workdir,
     Input,
     Stt,
@@ -37,8 +43,10 @@ pub enum Row {
     TestVoice,
 }
 
-pub const ROWS: [Row; 17] = [
+pub const ROWS: [Row; 19] = [
     Row::Agent,
+    Row::Model,
+    Row::Effort,
     Row::Workdir,
     Row::Input,
     Row::Stt,
@@ -99,8 +107,17 @@ impl SettingsView {
         ROWS[self.selected]
     }
 
-    /// The label, value and hint of each row, for drawing.
-    pub fn describe(&self, row: Row, c: &Config, catalog: &[AgentInfo], allow_all: bool) -> (&'static str, String, &'static str) {
+    /// The label, value and hint of each row, for drawing. `choices` and
+    /// `model` are the running agent's, with its model label.
+    pub fn describe(
+        &self,
+        row: Row,
+        c: &Config,
+        catalog: &[AgentInfo],
+        allow_all: bool,
+        choices: Option<&Choices>,
+        model: &str,
+    ) -> (&'static str, String, &'static str) {
         let on = |b: bool| if b { "on" } else { "off" }.to_string();
         match row {
             Row::Agent => {
@@ -108,6 +125,24 @@ impl SettingsView {
                 let name = a.map(|a| a.name).unwrap_or("?");
                 let v = if a.is_some_and(|a| a.installed) { name.to_string() } else { format!("{name} (not installed)") };
                 ("Agent", v, "The agent must be logged in: use \"Log in\" below once.")
+            }
+            Row::Model | Row::Effort => {
+                let what = if row == Row::Model { Choosable::Model } else { Choosable::Effort };
+                let label = if row == Row::Model { "Model" } else { "Effort" };
+                if c.chat.agent == "claude" {
+                    return (label, "not for Claude Code".into(), "Only for the ACP agents, like OpenCode, Grok and Cursor.");
+                }
+                let Some(choices) = choices else {
+                    return (label, "press enter to ask the agent".into(), "The agent tells its models and effort levels when it runs.");
+                };
+                let v = match choices.get(what) {
+                    Some(s) => s.current_name(),
+                    None => match model.split_once(" · ") {
+                        Some((_, effort)) if what == Choosable::Effort && choices.model.is_some() => format!("{effort} (set with the model)"),
+                        _ => "not offered by this agent".into(),
+                    },
+                };
+                (label, v, "Takes effect at once, and omanta sets it again at the next start. In the chat: /model or /effort.")
             }
             Row::Workdir => {
                 let v = if c.chat.workdir.is_empty() { "~ (home)".into() } else { c.chat.workdir.clone() };
@@ -152,7 +187,7 @@ impl SettingsView {
     }
 
     /// Handles a key; returns what the chat must do.
-    pub fn key(&mut self, k: &KeyEvent, c: &mut Config, catalog: &[AgentInfo]) -> Option<Action> {
+    pub fn key(&mut self, k: &KeyEvent, c: &mut Config, catalog: &[AgentInfo], choices: Option<&Choices>) -> Option<Action> {
         if let Some(edit) = self.editing.as_mut() {
             match k.code {
                 KeyCode::Esc => self.editing = None,
@@ -217,6 +252,16 @@ impl SettingsView {
                 let changed = next != c.chat.agent;
                 c.chat.agent = next;
                 return Some(Action::Saved { agent_changed: changed });
+            }
+            Row::Model | Row::Effort => {
+                if c.chat.agent == "claude" {
+                    return None;
+                }
+                let Some(choices) = choices else { return Some(Action::LoadChoices) };
+                let what = if self.row() == Row::Model { Choosable::Model } else { Choosable::Effort };
+                let setting = choices.get(what).filter(|s| !s.choices.is_empty())?;
+                let values: Vec<String> = setting.choices.iter().map(|x| x.value.clone()).collect();
+                return Some(Action::Choose(what, cycle(&values, &setting.current, step)));
             }
             Row::Workdir | Row::TalkKey if step == 0 => {
                 let mut e = LineInput::default();
