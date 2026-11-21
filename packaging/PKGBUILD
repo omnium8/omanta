@@ -34,4 +34,5 @@ package() {
     install -Dm644 "packaging/icons/$size.png" "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/omanta.png"
   done
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  install -Dm644 -t "$pkgdir/usr/share/doc/$pkgname" README.md INSTALL.md MANUAL.md
 }
