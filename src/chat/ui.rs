@@ -413,11 +413,20 @@ fn draw_input(f: &mut Frame, app: &App, area: Rect) {
     };
     let muted = Style::new().fg(app.theme.muted);
     let k = |s: String| Span::styled(s, Style::new().fg(app.theme.accent));
-    let auto = if app.allow_all {
-        Line::from(vec![Span::raw(" "), Span::styled(">> auto", Style::new().fg(app.theme.accent).bold()), Span::styled(" · tab ", muted)])
+    // Auto mode: off, the agent asks before each action; on, it does
+    // everything, and the words take every theme color, one per letter.
+    let mut auto = vec![Span::raw(" "), k("tab".into())];
+    if app.allow_all {
+        let words = " >> fix everything";
+        let n = words.chars().count() as f64;
+        auto.extend(words.chars().enumerate().map(|(i, c)| {
+            Span::styled(c.to_string(), Style::new().fg(app.theme.spectrum_color(i as f64 / n, 0.85)).bold())
+        }));
+        auto.push(Span::raw(" "));
     } else {
-        Line::from(vec![Span::raw(" "), k("tab".into()), Span::styled(" auto off ", muted)])
-    };
+        auto.push(Span::styled(" approve everything ", muted));
+    }
+    let auto = Line::from(auto);
     // Omarchy's push-to-talk first. What does not fit beside the auto mode
     // is left off from the end, so nothing overlaps.
     let mut keys: Vec<(String, &str)> = Vec::new();

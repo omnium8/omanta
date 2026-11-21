@@ -84,7 +84,9 @@ effect on the next conversation (`ctrl+n`).
    "yes", "no", or "always" are enough. Anything else is sent to the agent
    as what to do instead. "Always" for a shell command allows only the
    programs in that command. **Auto mode** (`tab`) allows every action
-   without asking, for this run.
+   without asking, for this run. The footer shows `tab approve everything`
+   when it is off and `tab >> fix everything`, in all the theme's colors,
+   when it is on.
 
 5. **Status, not noise.** Tool steps show as short lines ("reading main.rs").
    omanta does not read them aloud.
