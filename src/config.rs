@@ -73,7 +73,7 @@ impl Default for Chat {
             talk_key: "ctrl+space".into(),
             send_after: 2,
             speak_replies: true,
-            wave_rows: 3,
+            wave_rows: 1,
             transparency: 0.0,
         }
     }
