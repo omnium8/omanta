@@ -1,7 +1,7 @@
 # The recipe for this checkout: bin/install and the release workflow use it.
 # The AUR recipe, which downloads the source, is aur/PKGBUILD.
 pkgname=omanta
-pkgver=0.2.6
+pkgver=0.3.0
 pkgrel=1
 pkgdesc='Talk with any coding agent by voice: a chat TUI with a local Kokoro voice'
 arch=('x86_64' 'aarch64')

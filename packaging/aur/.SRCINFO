@@ -1,6 +1,6 @@
 pkgbase = omanta
 	pkgdesc = Talk with any coding agent by voice: a chat TUI with a local Kokoro voice
-	pkgver = 0.2.6
+	pkgver = 0.3.0
 	pkgrel = 1
 	url = https://github.com/omnium8/omanta
 	arch = x86_64
@@ -19,7 +19,7 @@ pkgbase = omanta
 	optdepends = superwhisper: speech to text for the talk key
 	optdepends = wtype: read selections that are not in the primary selection
 	options = !debug
-	source = omanta::git+https://github.com/omnium8/omanta.git#tag=v0.2.6
+	source = omanta::git+https://github.com/omnium8/omanta.git#tag=v0.3.0
 	sha256sums = SKIP
 
 pkgname = omanta

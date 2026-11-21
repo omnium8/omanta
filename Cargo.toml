@@ -1,6 +1,6 @@
 [package]
 name = "omanta"
-version = "0.2.6"
+version = "0.3.0"
 edition = "2021"
 description = "Talk with any coding agent by voice on Omarchy: a chat TUI with local Kokoro speech"
 license = "MIT"
