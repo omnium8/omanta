@@ -135,6 +135,8 @@ pub enum Event {
     /// The turn ended.
     Done { error: Option<String>, cancelled: bool },
     Retrying(String),
+    /// The model it runs and its effort level, short, like "opus 5.5 · high".
+    Model(String),
     /// It cannot go on (not logged in, no session).
     Failed(String),
 }

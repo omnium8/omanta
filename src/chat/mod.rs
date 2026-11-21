@@ -141,6 +141,8 @@ pub struct App {
     /// How far the wheel has walked along the status line while the voice
     /// speaks, 0 to 1: the voice's progress, smoothed.
     pub walk: f64,
+    /// The agent's model and effort, shown before the voice status.
+    pub model: String,
     /// When the chat opened: the clock for the animations.
     pub born: Instant,
     /// Something on the screen moves: draw frames faster.
@@ -366,6 +368,7 @@ impl App {
             push_to_talk: paths::find_program("omarchy-dictation").is_some(),
             see_through_set: false,
             walk: 0.0,
+            model: String::new(),
             born: Instant::now(),
             animate,
             levels: levels::Levels::start(),
@@ -642,6 +645,7 @@ impl App {
             self.note(&format!("{} is not installed: {} is not on your PATH.", self.agent.name, self.agent.bin));
             return;
         };
+        self.model.clear();
         let mut link = agent::create(&self.agent);
         let args = link.arguments(self.session.as_deref());
         let cwd = self.config.workdir();
@@ -785,6 +789,7 @@ impl App {
                     self.say("Sorry, that did not work.");
                 }
             }
+            Event::Model(label) => self.model = label,
             Event::Retrying(err) => self.note(&format!("retrying: {err}")),
             Event::Failed(message) => {
                 if looks_like_login(&message) {

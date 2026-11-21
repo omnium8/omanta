@@ -192,6 +192,9 @@ impl Acp {
     fn answered(&mut self, pending: Pending, result: &Value, error: &Value) -> Vec<Event> {
         let mut out = Vec::new();
         let failed = !error.is_null();
+        if let Some(label) = model_label(&result["models"], &result["configOptions"]) {
+            out.push(Event::Model(label));
+        }
         match pending {
             Pending::Initialize => {
                 self.auth_methods = result["authMethods"]
@@ -268,9 +271,43 @@ impl Acp {
             }
             "tool_call" => vec![Event::Working, Event::Step(act(u))],
             "agent_thought_chunk" => vec![Event::Thinking],
+            "config_option_update" => model_label(&Value::Null, &u["configOptions"]).map(Event::Model).into_iter().collect(),
             _ => vec![],
         }
     }
+}
+
+/// The session's model and effort, like "grok 4.6 · high", from ACP's
+/// `models` (with Grok's and Cursor's effort in it) or `configOptions`.
+fn model_label(models: &Value, options: &Value) -> Option<String> {
+    let option = |category: &str| {
+        options.as_array()?.iter().find(|o| o["category"] == category).and_then(|o| {
+            let value = o["currentValue"].as_str()?;
+            let named = o["options"].as_array().and_then(|l| l.iter().find(|c| c["value"] == value)).and_then(|c| c["name"].as_str());
+            Some(named.unwrap_or(value).to_string())
+        })
+    };
+    let current = models["currentModelId"].as_str();
+    let entry = current.and_then(|c| models["availableModels"].as_array()?.iter().find(|m| m["modelId"] == c));
+    // Cursor puts settings in the id: "gpt-5[effort=high,fast=true]".
+    let (bare, settings) = match current {
+        Some(c) => match c.split_once('[') {
+            Some((b, rest)) => (b, rest.trim_end_matches(']')),
+            None => (c, ""),
+        },
+        None => ("", ""),
+    };
+    let model = entry.and_then(|m| m["name"].as_str()).map(str::to_string).or_else(|| (!bare.is_empty()).then(|| bare.to_string())).or_else(|| option("model"))?;
+    let effort = entry
+        .and_then(|m| m["_meta"]["reasoningEffort"].as_str().map(str::to_string))
+        .or_else(|| settings.split(',').find_map(|kv| kv.split_once('=').filter(|(k, _)| k.ends_with("effort")).map(|(_, v)| v.to_string())))
+        .or_else(|| option("thought_level"));
+    let mut label = model.to_lowercase();
+    if let Some(e) = effort.filter(|e| !e.is_empty()) {
+        label.push_str(" · ");
+        label.push_str(&e.to_lowercase());
+    }
+    Some(label)
 }
 
 impl Link for Acp {
@@ -342,6 +379,7 @@ impl Link for Acp {
         }
         let params = &ev["params"];
         match (method, id) {
+            ("_x.ai/models/update", _) => model_label(params, &Value::Null).map(Event::Model).into_iter().collect(),
             ("session/update", _) => {
                 if self.loading {
                     vec![]
@@ -403,6 +441,19 @@ impl Link for Acp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn labels_models() {
+        let grok = json!({"currentModelId": "grok-4.6", "availableModels": [{"modelId": "grok-4.6", "name": "Grok 4.6", "_meta": {"reasoningEffort": "high"}}]});
+        assert_eq!(model_label(&grok, &Value::Null).as_deref(), Some("grok 4.6 · high"));
+        let cursor = json!({"currentModelId": "gpt-5.6[effort=medium,fast=true]", "availableModels": [{"modelId": "gpt-5.6[effort=medium,fast=true]", "name": "gpt-5.6"}]});
+        assert_eq!(model_label(&cursor, &Value::Null).as_deref(), Some("gpt-5.6 · medium"));
+        let auto = json!({"currentModelId": "default[]", "availableModels": [{"modelId": "default[]", "name": "Auto"}]});
+        assert_eq!(model_label(&auto, &Value::Null).as_deref(), Some("auto"));
+        let options = json!([{"category": "model", "currentValue": "m1", "options": [{"value": "m1", "name": "Sonic"}]}, {"category": "thought_level", "currentValue": "low"}]);
+        assert_eq!(model_label(&Value::Null, &options).as_deref(), Some("sonic · low"));
+        assert_eq!(model_label(&Value::Null, &Value::Null), None);
+    }
 
     fn last(a: &mut Acp) -> Value {
         serde_json::from_str(a.drain().last().unwrap()).unwrap()

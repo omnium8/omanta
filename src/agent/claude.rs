@@ -45,6 +45,30 @@ pub fn act(tool: &str, input: &Value) -> Act {
     }
 }
 
+/// Claude Code's user settings.
+fn settings() -> Value {
+    let path = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default().join(".claude/settings.json");
+    std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null)
+}
+
+/// "claude-opus-5-5" with effort "high" becomes "opus 5.5 · high".
+fn model_label(model: &str, settings: &Value) -> String {
+    let id = model.split('[').next().unwrap_or(model);
+    let effort = std::env::var("CLAUDE_CODE_EFFORT_LEVEL")
+        .ok()
+        .or_else(|| settings["modelSettings"][id]["effortLevel"].as_str().map(str::to_string))
+        .or_else(|| settings["effortLevel"].as_str().map(str::to_string));
+    let mut parts = id.strip_prefix("claude-").unwrap_or(id).split('-').filter(|p| !(p.len() >= 8 && p.bytes().all(|b| b.is_ascii_digit())));
+    let family = parts.next().unwrap_or(id);
+    let version: Vec<&str> = parts.collect();
+    let mut label = if version.is_empty() { family.to_string() } else { format!("{family} {}", version.join(".")) };
+    if let Some(e) = effort.filter(|e| !e.is_empty()) {
+        label.push_str(" · ");
+        label.push_str(&e);
+    }
+    label
+}
+
 impl Claude {
     fn send(&mut self, v: Value) {
         self.outbox.push(v.to_string());
@@ -144,6 +168,11 @@ impl Link for Claude {
         let sub = !ev["parent_tool_use_id"].is_null();
         match ev["type"].as_str().unwrap_or("") {
             "system" => {
+                if ev["subtype"] == "init" {
+                    if let Some(m) = ev["model"].as_str() {
+                        out.push(Event::Model(model_label(m, &settings())));
+                    }
+                }
                 if ev["subtype"] == "api_retry" {
                     out.push(Event::Retrying(ev["error"].as_str().unwrap_or("network").to_string()));
                 }
@@ -209,6 +238,15 @@ impl Link for Claude {
                 let r = &ev["response"];
                 if r["request_id"] == "init" && r["subtype"] == "error" {
                     out.push(Event::Failed(r["error"].as_str().unwrap_or("").to_string()));
+                } else if r["request_id"] == "init" {
+                    // The first prompt names the model; until then, guess it from settings.
+                    let settings = settings();
+                    let alias = settings["model"].as_str().unwrap_or("default");
+                    let models = r["response"]["models"].as_array().cloned().unwrap_or_default();
+                    let pick = models.iter().find(|m| m["value"] == alias).or_else(|| models.iter().find(|m| m["value"] == "default"));
+                    if let Some(m) = pick.and_then(|m| m["resolvedModel"].as_str()) {
+                        out.push(Event::Model(model_label(m, &settings)));
+                    }
                 }
             }
             _ => {}
@@ -224,6 +262,14 @@ impl Link for Claude {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn labels_models() {
+        let s = json!({"modelSettings": {"claude-opus-5-5": {"effortLevel": "high"}}});
+        assert_eq!(model_label("claude-opus-5-5", &s), "opus 5.5 · high");
+        assert_eq!(model_label("claude-sonnet-4-5-20250929", &Value::Null), "sonnet 4.5");
+        assert_eq!(model_label("claude-haiku-5-5[1m]", &json!({"effortLevel": "low"})), "haiku 5.5 · low");
+    }
 
     fn parse(s: &str) -> Value {
         serde_json::from_str(s).unwrap()

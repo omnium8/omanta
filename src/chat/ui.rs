@@ -172,10 +172,10 @@ fn status_span(app: &App) -> Vec<Span<'static>> {
         _ => vec![Span::styled("○", Style::new().fg(muted))],
     };
     let mut text = match state {
-        "listening" => format!("listening · {} to send", app.config.chat.talk_key),
-        "speaking" => format!("speaking · {} to talk over it", app.config.chat.talk_key),
-        "idle" if app.config.chat.input == "key" => format!("{} to talk", app.config.chat.talk_key),
+        "idle" if app.config.chat.input == "key" => "ready".to_string(),
         "idle" => "dictate or type, then enter".to_string(),
+        "thinking" => "tensoring".to_string(),
+        "working" => "calculating".to_string(),
         other => other.to_string(),
     };
     if app.busy && app.seconds() > 0 {
@@ -205,6 +205,8 @@ fn voice_span(app: &App) -> Span<'static> {
         return Span::styled(format!(" voice: {p} "), Style::new().fg(app.theme.accent));
     }
     match v.status.phase.as_str() {
+        // Once the voice is ready, the agent's model and effort take its place.
+        "ready" if !app.model.is_empty() => Span::styled(format!(" {} ", app.model), muted),
         "ready" => Span::styled(" voice ready ", muted),
         "downloading" => Span::styled(" downloading the voice (340 MB)… ", muted),
         "installing" => Span::styled(" installing the voice… ", muted),
@@ -220,9 +222,7 @@ fn draw_conversation(f: &mut Frame, app: &App, area: Rect) {
         // The status line becomes a track the wheel walks along with the voice.
         let accent = Style::new().fg(app.theme.accent);
         let voice = voice_span(app);
-        let long = format!(" speaking · {} to talk over it", app.config.chat.talk_key);
-        let fits = |text: &str| (area.width as usize).saturating_sub(text.width() + voice.width() + 3) >= 24;
-        let text = if fits(&long) { long } else { " speaking".to_string() };
+        let text = " speaking".to_string();
         let room = (area.width as usize).saturating_sub(text.width() + voice.width() + 3);
         block = block
             .title_bottom(walk_line(app, room))
